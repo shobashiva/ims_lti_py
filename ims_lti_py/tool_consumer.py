@@ -56,18 +56,40 @@ class ToolConsumer(LaunchParamsMixin, RequestValidatorMixin, object):
         return {
             'oauth_nonce': str(generate_identifier()),
             'oauth_timestamp': str(int(time.time())),
-            'oauth_scheme': 'body'
         }
 
-    def generate_launch_data(self):
+    def generate_launch_data(self, role, privacy):
         # Validate params
         if not self.has_required_params():
             raise InvalidLTIConfigError('ToolConsumer does not have all required attributes: consumer_key = %s, consumer_secret = %s, resource_link_id = %s, launch_url = %s' %(self.consumer_key, self.consumer_secret, self.resource_link_id, self.launch_url))
 
         params = self.to_params()
+        #print params['roles']
 
-        if not params.get('lit_version', None):
-            params['lti_version'] = 'LTI-1.0'
+        #RCH 11/17/2015 - For some reason the 'roles' param is now surrounded by brackets
+        #IMS Global doesn't like this so it is being removed here
+        #role = re.sub(r'\[\]','',params.get('roles'))
+        params.update({'roles': role} )
+        #params.update({'roles':'Instructor'})
+
+        #SSD 11/19/2015 Adding a parameter to pass on privacy settings
+
+        if privacy == 'name':
+            del params['lis_person_contact_email_primary']
+        elif privacy == 'email':
+            del params['lis_person_name_full']
+            del params['lis_person_name_family']
+            del params['lis_person_name_given']
+        elif privacy == 'none':
+            del params['lis_person_contact_email_primary']
+            del params['lis_person_name_full']
+            del params['lis_person_name_given']
+            del params['lis_person_name_family']
+
+
+        if not params.get('lti_version', None):
+            params['lti_version'] = 'LTI-1p0'
+
 
         params['lti_message_type'] = 'basic-lti-launch-request'
 
@@ -78,19 +100,23 @@ class ToolConsumer(LaunchParamsMixin, RequestValidatorMixin, object):
         params.update(self._params_update())
         params.update({'oauth_consumer_key': consumer.key})
 
-        uri = urlparse.urlparse(self.launch_url)
-        if uri.query != '':
-            for param in uri.query.split('&'):
-                key, val = param.split('=')
-                if params.get(key) == None:
-                    params[key] = str(val)
+        #RCH 11/17/2015 - commented the following lines below because it's adding the query string parameters twice to the base signature which
+        #                   prevents it from matching to ims global's base signature
+        # uri = urlparse.urlparse(self.launch_url)
+        # if uri.query != '':
+        #     for param in uri.query.split('&'):
+        #         key, val = param.split('=')
+        #         if params.get(key) == None:
+        #             params[key] = str(val)
 
-        request = oauth2.Request(method = 'POST', 
+        request = oauth2.Request(method = 'POST',
                 url = self.launch_url,
-                parameters = params)
+                parameters = params, is_form_encoded=True)
 
-        signature_method = oauth2.SignatureMethod_HMAC_SHA1()
-        request.sign_request(signature_method, consumer, None)
+        signatureMethod = oauth2.SignatureMethod_HMAC_SHA1()
+        #print signatureMethod.signing_base(request, consumer, None)
+
+        request.sign_request(oauth2.SignatureMethod_HMAC_SHA1(), consumer, None)
 
         # Request was made by an HTML form in the user's browser.
         # Return the dict of post parameters ready for embedding
@@ -104,3 +130,4 @@ class ToolConsumer(LaunchParamsMixin, RequestValidatorMixin, object):
             else:
                 return_params[key] = unquote(request.get_parameter(key))
         return return_params
+
